@@ -1,3 +1,7 @@
+“[yasea] is being sponsored by the following tool; please help to support us by taking a look and signing up to a free trial”
+
+<a href="https://tracking.gitads.io/?repo=yasea"> <img src="https://images.gitads.io/yasea" alt="GitAds"/> </a>
+
 Yet Another Stream Encoder for Android
 ======================================
 
@@ -9,7 +13,7 @@ camera and microphone to H.264/AAC, encapsulates in FLV and transmits over RTMP.
 Branch
 ------
 
-[non-gpuimage](https://github.com/begeekmyfriend/yasea/tree/non-gpuimage) for demo without GPUImage module.
+[non-gpuimage](https://github.com/begeekmyfriend/yasea/tree/non-gpuimage) for Android without GL ES library like development board.
 
 [android-16](https://github.com/begeekmyfriend/yasea/tree/android-16) for Android API 16+.
 
@@ -63,8 +67,3 @@ Acknowledgements
 - [MagicCamera](https://github.com/wuhaoyu1990/MagicCamera)
 - [x264](http://www.videolan.org/developers/x264.html)
 - [mp4parser](https://android.googlesource.com/platform/external/mp4parser)
-
-Sponsor
--------
-
-- [dotEngine](https://dot.cc) -- A brilliant realtime multimedia communication service vendor with open cross-platform SDK ([github](https://github.com/dotEngine)).

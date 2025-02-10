@@ -47,8 +47,6 @@ public class SrsEncoder {
     private MediaCodecInfo vmci;
     private MediaCodec vencoder;
     private MediaCodec aencoder;
-    private MediaCodec.BufferInfo vebi = new MediaCodec.BufferInfo();
-    private MediaCodec.BufferInfo aebi = new MediaCodec.BufferInfo();
 
     private boolean networkWeakTriggered = false;
     private boolean mCameraFaceFront = true;
@@ -56,6 +54,7 @@ public class SrsEncoder {
     private boolean canSoftEncode = false;
 
     private long mPresentTimeUs;
+    private long mPausetime;
 
     private int mVideoColorFormat;
 
@@ -172,6 +171,14 @@ public class SrsEncoder {
         return true;
     }
 
+    public void pause(){
+        mPausetime = System.nanoTime() / 1000;
+    }
+    public void resume(){
+        long resumeTime = (System.nanoTime() / 1000) - mPausetime;
+        mPresentTimeUs = mPresentTimeUs + resumeTime;
+        mPausetime = 0;
+    }
     public void stop() {
         if (useSoftEncoder) {
             closeSoftEncoder();
@@ -180,14 +187,22 @@ public class SrsEncoder {
 
         if (aencoder != null) {
             Log.i(TAG, "stop aencoder");
-            aencoder.stop();
+            try {
+                aencoder.stop();
+            }catch (IllegalStateException e){
+                e.printStackTrace();
+            }
             aencoder.release();
             aencoder = null;
         }
 
         if (vencoder != null) {
             Log.i(TAG, "stop vencoder");
-            vencoder.stop();
+            try {
+                vencoder.stop();
+            }catch (IllegalStateException e){
+                e.printStackTrace();
+            }
             vencoder.release();
             vencoder = null;
         }
@@ -307,6 +322,7 @@ public class SrsEncoder {
         }
 
         for (; ; ) {
+            MediaCodec.BufferInfo vebi = new MediaCodec.BufferInfo();
             int outBufferIndex = vencoder.dequeueOutputBuffer(vebi, 0);
             if (outBufferIndex >= 0) {
                 ByteBuffer bb = outBuffers[outBufferIndex];
@@ -320,6 +336,7 @@ public class SrsEncoder {
 
     private void onSoftEncodedData(byte[] es, long pts, boolean isKeyFrame) {
         ByteBuffer bb = ByteBuffer.wrap(es);
+        MediaCodec.BufferInfo vebi = new MediaCodec.BufferInfo();
         vebi.offset = 0;
         vebi.size = es.length;
         vebi.presentationTimeUs = pts;
@@ -340,10 +357,15 @@ public class SrsEncoder {
     }
 
     public void onGetPcmFrame(byte[] data, int size) {
+        
+        if(mPausetime > 0){
+            return;
+        }        
+        
         // Check video frame cache number to judge the networking situation.
         // Just cache GOP / FPS seconds data according to latency.
         AtomicInteger videoFrameCacheNumber = flvMuxer.getVideoFrameCacheNumber();
-        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP) {
+        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP / 2) {
             ByteBuffer[] inBuffers = aencoder.getInputBuffers();
             ByteBuffer[] outBuffers = aencoder.getOutputBuffers();
 
@@ -357,6 +379,7 @@ public class SrsEncoder {
             }
 
             for (; ; ) {
+                MediaCodec.BufferInfo aebi = new MediaCodec.BufferInfo();
                 int outBufferIndex = aencoder.dequeueOutputBuffer(aebi, 0);
                 if (outBufferIndex >= 0) {
                     ByteBuffer bb = outBuffers[outBufferIndex];
@@ -370,10 +393,15 @@ public class SrsEncoder {
     }
 
     public void onGetRgbaFrame(byte[] data, int width, int height) {
+        
+        if(mPausetime > 0){
+            return;
+        }                
+        
         // Check video frame cache number to judge the networking situation.
         // Just cache GOP / FPS seconds data according to latency.
         AtomicInteger videoFrameCacheNumber = flvMuxer.getVideoFrameCacheNumber();
-        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP) {
+        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP / 2) {
             long pts = System.nanoTime() / 1000 - mPresentTimeUs;
             if (useSoftEncoder) {
                 swRgbaFrame(data, width, height, pts);
@@ -400,7 +428,7 @@ public class SrsEncoder {
         // Check video frame cache number to judge the networking situation.
         // Just cache GOP / FPS seconds data according to latency.
         AtomicInteger videoFrameCacheNumber = flvMuxer.getVideoFrameCacheNumber();
-        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP) {
+        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP / 2) {
             long pts = System.nanoTime() / 1000 - mPresentTimeUs;
             if (useSoftEncoder) {
                 throw new UnsupportedOperationException("Not implemented");
@@ -428,7 +456,7 @@ public class SrsEncoder {
         // Check video frame cache number to judge the networking situation.
         // Just cache GOP / FPS seconds data according to latency.
         AtomicInteger videoFrameCacheNumber = flvMuxer.getVideoFrameCacheNumber();
-        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP) {
+        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP / 2) {
             long pts = System.nanoTime() / 1000 - mPresentTimeUs;
             if (useSoftEncoder) {
                 throw new UnsupportedOperationException("Not implemented");
@@ -456,7 +484,7 @@ public class SrsEncoder {
         // Check video frame cache number to judge the networking situation.
         // Just cache GOP / FPS seconds data according to latency.
         AtomicInteger videoFrameCacheNumber = flvMuxer.getVideoFrameCacheNumber();
-        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP) {
+        if (videoFrameCacheNumber != null && videoFrameCacheNumber.get() < VGOP / 2) {
             long pts = System.nanoTime() / 1000 - mPresentTimeUs;
             if (useSoftEncoder) {
                 throw new UnsupportedOperationException("Not implemented");
@@ -528,11 +556,12 @@ public class SrsEncoder {
         RGBASoftEncode(data, width, height, true, 180, pts);
     }
 
+    @SuppressLint("MissingPermission")
     public AudioRecord chooseAudioRecord() {
-        AudioRecord mic = new AudioRecord(MediaRecorder.AudioSource.DEFAULT, SrsEncoder.ASAMPLERATE,
+        AudioRecord mic = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SrsEncoder.ASAMPLERATE,
             AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT, getPcmBufferSize() * 4);
         if (mic.getState() != AudioRecord.STATE_INITIALIZED) {
-            mic = new AudioRecord(MediaRecorder.AudioSource.DEFAULT, SrsEncoder.ASAMPLERATE,
+            mic = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SrsEncoder.ASAMPLERATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, getPcmBufferSize() * 4);
             if (mic.getState() != AudioRecord.STATE_INITIALIZED) {
                 mic = null;

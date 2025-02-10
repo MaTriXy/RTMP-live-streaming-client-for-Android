@@ -1,11 +1,16 @@
 package net.ossrs.yasea.demo;
 
+import android.Manifest;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.hardware.Camera;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Menu;
@@ -32,17 +37,24 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
                         SrsRecordHandler.SrsRecordListener, SrsEncodeHandler.SrsEncodeListener {
 
     private static final String TAG = "Yasea";
+    public final static int RC_CAMERA = 100;
 
     private Button btnPublish;
     private Button btnSwitchCamera;
     private Button btnRecord;
     private Button btnSwitchEncoder;
+    private Button btnPause;
 
     private SharedPreferences sp;
     private String rtmpUrl = "rtmp://ossrs.net/" + getRandomAlphaString(3) + '/' + getRandomAlphaDigitString(5);
     private String recPath = Environment.getExternalStorageDirectory().getPath() + "/test.mp4";
 
     private SrsPublisher mPublisher;
+    private SrsCameraView mCameraView;
+
+    private int mWidth = 640;
+    private int mHeight = 480;
+    private boolean isPermissionGranted = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,6 +66,42 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         // response screen rotation event
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
 
+        requestPermission();
+    }
+
+    private void requestPermission() {
+        //1. 检查是否已经有该权限
+        if (Build.VERSION.SDK_INT >= 23 && (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED)) {
+            //2. 权限没有开启，请求权限
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.WRITE_EXTERNAL_STORAGE}, RC_CAMERA);
+        }else{
+            //权限已经开启，做相应事情
+            isPermissionGranted = true;
+            init();
+        }
+    }
+
+    //3. 接收申请成功或者失败回调
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == RC_CAMERA) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                //权限被用户同意,做相应的事情
+                isPermissionGranted = true;
+                init();
+            } else {
+                //权限被用户拒绝，做相应的事情
+                finish();
+            }
+        }
+    }
+
+    private void init() {
         // restore data.
         sp = getSharedPreferences("Yasea", MODE_PRIVATE);
         rtmpUrl = sp.getString("rtmpUrl", rtmpUrl);
@@ -66,15 +114,27 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         btnSwitchCamera = (Button) findViewById(R.id.swCam);
         btnRecord = (Button) findViewById(R.id.record);
         btnSwitchEncoder = (Button) findViewById(R.id.swEnc);
+        btnPause = (Button) findViewById(R.id.pause);
+        btnPause.setEnabled(false);
+        mCameraView = (SrsCameraView) findViewById(R.id.glsurfaceview_camera);
 
-        mPublisher = new SrsPublisher((SrsCameraView) findViewById(R.id.glsurfaceview_camera));
+        mPublisher = new SrsPublisher(mCameraView);
         mPublisher.setEncodeHandler(new SrsEncodeHandler(this));
         mPublisher.setRtmpHandler(new RtmpHandler(this));
         mPublisher.setRecordHandler(new SrsRecordHandler(this));
-        mPublisher.setPreviewResolution(640, 360);
-        mPublisher.setOutputResolution(360, 640);
+        mPublisher.setPreviewResolution(mWidth, mHeight);
+        mPublisher.setOutputResolution(mHeight, mWidth); // 这里要和preview反过来
         mPublisher.setVideoHDMode();
         mPublisher.startCamera();
+
+        mCameraView.setCameraCallbacksHandler(new SrsCameraView.CameraCallbacksHandler(){
+            @Override
+            public void onCameraParameters(Camera.Parameters params) {
+                //params.setFocusMode("custom-focus");
+                //params.setWhiteBalance("custom-balance");
+                //etc...
+            }
+        });
 
         btnPublish.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -95,12 +155,26 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
                     }
                     btnPublish.setText("stop");
                     btnSwitchEncoder.setEnabled(false);
+                    btnPause.setEnabled(true);
                 } else if (btnPublish.getText().toString().contentEquals("stop")) {
                     mPublisher.stopPublish();
                     mPublisher.stopRecord();
                     btnPublish.setText("publish");
                     btnRecord.setText("record");
                     btnSwitchEncoder.setEnabled(true);
+                    btnPause.setEnabled(false);
+                }
+            }
+        });
+        btnPause.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if(btnPause.getText().toString().equals("Pause")){
+                    mPublisher.pausePublish();
+                    btnPause.setText("resume");
+                }else{
+                    mPublisher.resumePublish();
+                    btnPause.setText("Pause");
                 }
             }
         });
@@ -108,7 +182,7 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         btnSwitchCamera.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                mPublisher.switchCameraFace((mPublisher.getCamraId() + 1) % Camera.getNumberOfCameras());
+                mPublisher.switchCameraFace((mPublisher.getCameraId() + 1) % Camera.getNumberOfCameras());
             }
         });
 
@@ -213,6 +287,15 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         setTitle(item.getTitle());
 
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if(mPublisher.getCamera() == null && isPermissionGranted){
+            //if the camera was busy and available again
+            mPublisher.startCamera();
+        }
     }
 
     @Override
@@ -407,4 +490,5 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     public void onEncodeIllegalArgumentException(IllegalArgumentException e) {
         handleException(e);
     }
+
 }
